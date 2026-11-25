@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // CAMBIA este correo por el tuyo (el mismo de firebase-config.js)
+    function isOwner() {
+      return signedIn() && request.auth.token.email == 'eduardokuster@gmail.com';
+    }
+
+    // Un celular está "asignado" cuando el dueño lo puso en un piso o a un hijo
+    function asignado() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/config/dispositivos)
+        && request.auth.uid in get(/databases/$(database)/documents/config/dispositivos).data;
+    }
+
+    // Asignación de celulares: todos la leen, solo el dueño la cambia
+    match /config/{id} {
+      allow read: if signedIn();
+      allow write: if isOwner();
+    }
+
+    // Cada celular nuevo pide acceso con su propio código
+    match /solicitudes/{uid} {
+      allow read, write: if isOwner() || (signedIn() && request.auth.uid == uid);
+    }
+
+    // Resto de los datos: solo celulares asignados y el dueño.
+    // Ventas, pendientes, retiros y reinversiones las escriben los celulares;
+    // productos, reposiciones y entregas solo el dueño.
+    match /{col}/{id} {
+      allow read: if isOwner() || asignado();
+      allow write: if isOwner()
+        || (asignado() && col in ['ventas', 'fiados', 'cobros', 'reinversiones']);
+    }
+  }
+}

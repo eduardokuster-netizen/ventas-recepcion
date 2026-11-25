@@ -25,6 +25,7 @@ input{min-height:44px;border:2px solid var(--line);border-radius:12px;padding:0 
 header{background:var(--deep);color:#fff;padding:18px max(5vw,16px) 22px}
 .top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;max-width:1000px;margin:auto}
 h1{font-size:22px;margin:0;line-height:1.1}
+.ver{font-size:12px;font-weight:600;opacity:.7;margin-left:4px;white-space:nowrap}
 .nav{display:flex;gap:6px;background:#ffffff1f;padding:4px;border-radius:14px}
 .nav button{background:none;color:#fff;min-height:38px}.nav button.on{background:#fff;color:var(--deep)}
 .cash{max-width:1000px;margin:16px auto 0;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
@@ -89,7 +90,7 @@ label{font-weight:700;font-size:14px;display:block;margin:10px 0 4px}
 </head>
 <body>
 <header>
-  <div class="top"><h1>Ventas en recepción</h1><div class="nav" id="nav" hidden></div></div>
+  <div class="top"><h1>Ventas en recepción <span class="ver">v2.2</span></h1><div class="nav" id="nav" hidden></div></div>
   <div class="cash" id="cash"></div>
 </header>
 <main id="main"><p class="empty">Cargando…</p></main>

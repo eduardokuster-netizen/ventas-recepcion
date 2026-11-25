@@ -222,8 +222,13 @@ function renderVender(c,pu){
     :'<p class="empty">Todavía no hay productos cargados.</p>';
   const d=myDoc(pu),items=d?(d.data().items||[]).filter(i=>!i.anulado):[];
   const ventas=[];const idx={};for(const i of items){const g=i.v||i.id;if(!(g in idx)){idx[g]=ventas.length;ventas.push({g,ts:i.ts,l:[],t:0})}const v=ventas[idx[g]];v.l.push(i);v.t+=i.q*i.pr}
-  ventas.reverse();const tot=ventas.reduce((s,v)=>s+v.t,0);
-  const lista=ventas.length?ventas.map(v=>`<div class="row"><div class="g">${v.l.map(i=>`${i.q} × ${esc(S.prod[i.p]?.nombre||'Producto')}`).join('<br>')}<div class="s">${hm(v.ts)}</div></div><span class="m">${money(v.t)}</span><button class="ghost" data-a="undo" data-v="${esc(v.g)}">Deshacer</button></div>`).join(''):'<p class="empty">Aún no has vendido nada hoy.</p>';
+  ventas.reverse();
+  // Ventas pendientes que se cobraron hoy en este piso y turno: aparecen en "Tus ventas de hoy"
+  const hi=new Date();hi.setHours(0,0,0,0);
+  const cobrados=S.fiados.map(f=>({id:f.id,...f.data()})).filter(x=>x.pagado&&!x.anulado&&x.pagado.piso===pu.piso&&x.pagado.turno===pu.turno&&x.pagado.ts>=hi.getTime()).sort((a,b)=>b.pagado.ts-a.pagado.ts);
+  for(const x of cobrados)ventas.unshift({g:'F'+x.id,ts:x.pagado.ts,cob:x.cliente,l:(x.items||[]),t:(x.items||[]).reduce((s,i)=>s+i.q*i.pr,0)});
+  const tot=ventas.reduce((s,v)=>s+v.t,0);
+  const lista=ventas.length?ventas.map(v=>`<div class="row"><div class="g">${v.l.map(i=>`${i.q} × ${esc(S.prod[i.p]?.nombre||'Producto')}`).join('<br>')}<div class="s">${v.cob?'Cobrada a '+esc(v.cob)+' · ':''}${hm(v.ts)}</div></div><span class="m">${money(v.t)}</span>${v.cob?'<span class="s">Cobrada</span>':`<button class="ghost" data-a="undo" data-v="${esc(v.g)}">Deshacer</button>`}</div>`).join(''):'<p class="empty">Aún no has vendido nada hoy.</p>';
   const lines=Object.entries(cart).filter(([,n])=>n>0);const ct=lines.reduce((s,[id,n])=>s+n*(Number(S.prod[id]?.precio)||0),0);
   const fp=S.fiados.map(x=>({id:x.id,...x.data()})).filter(x=>x.piso===pu.piso&&!x.pagado&&!x.anulado).sort((a,b)=>a.ts-b.ts);
   const fl=fp.length?fp.map(x=>{const t=(x.items||[]).reduce((s,i)=>s+i.q*i.pr,0);return`<div class="row" style="flex-wrap:wrap"><div class="g"><b>${esc(x.cliente)}</b><div>${(x.items||[]).map(i=>`${i.q} × ${esc(S.prod[i.p]?.nombre||'Producto')}`).join(', ')}</div><div class="s">Vendió: ${TURNOS[x.turno]} · ${fh(x.ts)}</div></div><span class="m">${money(t)}</span><button class="dk" data-a="pagaFiado" data-v="${esc(x.id)}">Cobrar</button></div>`}).join(''):'<p class="empty">Nadie le debe a este piso.</p>';

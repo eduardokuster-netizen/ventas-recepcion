@@ -90,7 +90,7 @@ label{font-weight:700;font-size:14px;display:block;margin:10px 0 4px}
 </head>
 <body>
 <header>
-  <div class="top"><h1>Ventas en recepción <span class="ver">v2.3</span></h1><div class="nav" id="nav" hidden></div></div>
+  <div class="top"><h1>Ventas en recepción <span class="ver">v2.4</span></h1><div class="nav" id="nav" hidden></div></div>
   <div class="cash" id="cash"></div>
 </header>
 <main id="main"><p class="empty">Cargando…</p></main>
@@ -121,7 +121,7 @@ const fh=ts=>{const d=new Date(ts);return pad(d.getDate())+'/'+pad(d.getMonth()+
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const DUENOS=['Mateo','Matías'],QUIEN=['Elisa','Eduardo','Mateo','Matías'];
 const norm=n=>n==='Gerente'?'Elisa':n;
-let periodo='mes',db=null,owner=false,view='vender',tab='dinero',pisoRepo=1,repoVals={},sheetData=null,vistaAdm='vender',REG={};
+let periodo='mes',db=null,owner=false,view='vender',tab='dinero',pisoRepo=null,repoVals={},sheetData=null,vistaAdm='vender',REG={};
 let histF='todo',hijoSel='Mateo',hijoPer='mes',cart={},me=null,names={},solEstado='?',solUid='';
 let devId='',devCode='',turnoMan=null,unsubs=[],cfgUnsub=null,lastAsig=null,slow=null,chain=Promise.resolve();
 const S={prod:{},repo:[],cobros:[],entregas:[],ventas:[],fiados:[],rein:[],cfg:{},sol:[],got:{}};
@@ -326,12 +326,12 @@ function renderPanel(c){
       <button class="ghost" style="width:100%;margin-top:10px" data-a="irRepo" data-v="${n}">Reponer piso ${n}</button></div>`}).join('')}</div>`;
   }
   if(tab==='reponer'){
-    const st=c.stock[pisoRepo];
+    const st=c.stock[pisoRepo]||{};
     h+=`<h2>¿En qué piso vas a reponer?</h2><div class="pick">${PISOS.map(n=>`<button data-a="pisoRepo" data-v="${n}" class="${pisoRepo===n?'on':''}">Piso ${n}</button>`).join('')}</div>
-    <h2>Cuántas unidades quedan después de reponer</h2>
+    ${pisoRepo?'<h2>Cuántas unidades quedan después de reponer</h2>':'<p class="empty">Marca el piso donde vas a reponer para ver los productos.</p>'}
     <div class="rp" style="font-size:13px;color:var(--mut);font-weight:700"><span>Producto</span><span style="text-align:center">Hay</span><span style="text-align:center">Dejar en</span></div>
-    ${ps.length?ps.map(([id,p])=>{const v=repoVals[pisoRepo+'|'+id]??'';return`<div class="rp"><span>${esc(p.nombre)}</span><b style="text-align:center">${st[id]||0}</b><input type="number" inputmode="numeric" min="0" data-rp="${esc(id)}" value="${esc(v)}"></div>`}).join(''):'<p class="empty">Primero agrega productos.</p>'}
-    <button class="pri wide" data-a="guardarRepo" ${ps.length?'':'disabled'}>Guardar reposición</button>
+    ${!pisoRepo?'':ps.length?ps.map(([id,p])=>{const v=repoVals[pisoRepo+'|'+id]??'';return`<div class="rp"><span>${esc(p.nombre)}</span><b style="text-align:center">${st[id]||0}</b><input type="number" inputmode="numeric" min="0" data-rp="${esc(id)}" value="${esc(v)}"></div>`}).join(''):'<p class="empty">Primero agrega productos.</p>'}
+    <button class="pri wide" data-a="guardarRepo" ${ps.length&&pisoRepo?'':'disabled'}>Guardar reposición</button>
     <p class="note">"Dejar en" es el total que habrá en la recepción. Si cuentas menos de lo que dice la app (algo dañado o perdido), pon el número real y se ajusta.</p>`;
   }
   if(tab==='productos'){
@@ -475,10 +475,14 @@ const act={
   desasignar:id=>{const cfg={...S.cfg};delete cfg[id];queue(async()=>{await db.doc('config/dispositivos').set(cfg);toast('Celular quitado')})},
   irRepo:n=>{pisoRepo=Number(n);tab='reponer';render()},
   pisoRepo:n=>{pisoRepo=Number(n);render()},
-  guardarRepo:()=>{const st=calc().stock[pisoRepo],items=[];
+  guardarRepo:()=>{if(!pisoRepo)return toast('Primero marca el piso donde vas a reponer');const st=calc().stock[pisoRepo],items=[];
     for(const [id] of prods()){const raw=repoVals[pisoRepo+'|'+id];if(raw===undefined||String(raw).trim()==='')continue;const n=Math.max(0,Math.round(Number(raw)||0));const diff=n-(st[id]||0);if(diff)items.push({p:id,q:diff})}
-    if(!items.length)return toast('No hay cambios que guardar');const p=pisoRepo;
-    queue(async()=>{await db.collection('reposiciones').add({piso:p,items,ts:Date.now()});for(const k in repoVals)if(k.startsWith(p+'|'))delete repoVals[k];toast('Reposición guardada ✓')})},
+    if(!items.length)return toast('No hay cambios que guardar');
+    const nom=new Map(items.map(i=>[i.p,S.prod[i.p]?.nombre||'Producto']));
+    openSheet(`<h3>¿Confirmar reposición?</h3><p class="note">Piso ${pisoRepo}. Revisa antes de guardar:</p><div class="list">${items.map(i=>`<div class="row"><div class="g">${esc(nom.get(i.p))}<div class="s">Hay ${st[i.p]||0} → quedará en ${(st[i.p]||0)+i.q}</div></div><b>${i.q>0?'+':''}${i.q} uds.</b></div>`).join('')}</div><button class="pri wide" data-a="okRepo" style="margin-top:14px">Sí, guardar reposición</button><button class="ghost wide" data-a="cerrar">Cancelar</button>`);
+    sheetData={piso:pisoRepo,items}},
+  okRepo:()=>{const {piso,items}=sheetData;closeSheet();
+    queue(async()=>{await db.collection('reposiciones').add({piso,items,ts:Date.now()});for(const k in repoVals)if(k.startsWith(piso+'|'))delete repoVals[k];toast('Reposición guardada ✓')})},
   editP:id=>{const p=id?S.prod[id]:{nombre:'',precio:'',activo:true,dueno:''};const ops=[...new Set([...DUENOS,...(p.dueno?[p.dueno]:[])])];sheetData={pid:id,blob:null,quitar:false,foto:p.img||''};
     openSheet(`<h3>${id?'Editar producto':'Nuevo producto'}</h3>
     <div class="phed"><div class="phb" id="phb">${foto(p)?`<img src="${foto(p)}" alt="">`:'<span>Sin foto</span>'}</div><div style="display:grid;gap:8px"><label class="ghost upl">Tomar o elegir foto<input type="file" accept="image/*" id="pf" hidden></label>${foto(p)?'<button class="ghost" data-a="sinFoto">Quitar foto</button>':''}</div></div><label for="pn">Nombre</label><input id="pn" value="${esc(p.nombre)}">

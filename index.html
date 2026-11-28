@@ -90,7 +90,7 @@ label{font-weight:700;font-size:14px;display:block;margin:10px 0 4px}
 </head>
 <body>
 <header>
-  <div class="top"><h1>Ventas en recepción <span class="ver">v2.8</span></h1><div class="nav" id="nav" hidden></div></div>
+  <div class="top"><h1>Ventas en recepción <span class="ver">v2.9</span></h1><div class="nav" id="nav" hidden></div></div>
   <div class="cash" id="cash"></div>
 </header>
 <main id="main"><p class="empty">Cargando…</p></main>
@@ -142,6 +142,29 @@ const queue=fn=>{chain=chain.then(fn).catch(fail);return chain};
 const prods=()=>Object.entries(S.prod).filter(([,p])=>p.activo!==false).sort((a,b)=>String(a[1].nombre).localeCompare(String(b[1].nombre)));
 
 // ov = {k:'tipo:id', on:true|false} permite simular anular (on=true) o restaurar (on=false) un registro
+// Sigue el rastro de cada peso: cada retiro toma las ventas más antiguas del piso (primero entra, primero sale)
+// y cada entrega lleva consigo la parte de Mateo y de Matías que tenía quien entrega
+function trazaDinero(off){
+  const ev=[];
+  for(const v of S.ventas){const d=v.data();for(const i of d.items||[]){if(off(i,'v:'+(i.v||i.id)))continue;ev.push({t:i.ts,r:0,k:'s',piso:d.piso,du:S.prod[i.p]?.dueno||'Sin origen',val:i.q*i.pr})}}
+  for(const f of S.fiados){const x=f.data();if(!x.pagado||off(x,'f:'+f.id))continue;for(const i of x.items||[])ev.push({t:x.pagado.ts,r:0,k:'s',piso:x.pagado.piso,du:S.prod[i.p]?.dueno||'Sin origen',val:i.q*i.pr})}
+  for(const c of S.cobros){const d=c.data();if(off(d,'c:'+c.id))continue;ev.push({t:d.ts,r:1,k:'c',piso:d.piso,to:norm(d.a||'Eduardo'),m:Number(d.monto||0)})}
+  for(const x of S.entregas){const d=x.data();if(off(d,'e:'+x.id))continue;ev.push({t:d.ts,r:2,k:'e',de:norm(d.de),a:norm(d.a),m:Number(d.monto||0)})}
+  ev.sort((a,b)=>a.t-b.t||a.r-b.r);
+  const hb={},pools={},origen={};
+  const addTo=(who,own,amt)=>{hb[who]=hb[who]||{};hb[who][own]=(hb[who][own]||0)+amt};
+  for(const e of ev){
+    if(e.k==='s'){(pools[e.piso]=pools[e.piso]||[]).push({du:e.du,rem:e.val})}
+    else if(e.k==='c'){let need=e.m;const p=pools[e.piso]||[];
+      while(need>0.0001&&p.length){const f=p[0],u=Math.min(need,f.rem);addTo(e.to,f.du,u);f.rem-=u;need-=u;if(f.rem<=0.0001)p.shift()}
+      if(need>0.0001)addTo(e.to,'Sin origen',need)}
+    else{const h=hb[e.de]||{},tot=Object.values(h).reduce((s,v)=>s+v,0);
+      if(tot>0){for(const o in h){const amt=e.m*h[o]/tot;h[o]-=amt;addTo(e.a,o,amt)}}
+      else{addTo(e.de,'Sin origen',-e.m);addTo(e.a,'Sin origen',e.m)}}
+  }
+  for(const p in pools)for(const f of pools[p])if(f.rem>0.0001)origen[f.du]=(origen[f.du]||0)+f.rem;
+  return{hb,origen};
+}
 function calc(ov){
   const K=ov?ov.k:'',ON=ov?!!ov.on:false;
   const off=(rec,k)=>K===k?ON:!!rec.anulado;
@@ -154,11 +177,11 @@ function calc(ov){
     for(const it of d.items||[])stock[d.piso][it.p]=(stock[d.piso][it.p]||0)-it.q;
     if(d.pagado){const k=d.pagado.piso+d.pagado.turno;pend[k]=(pend[k]||0)+t;for(const it of d.items||[]){const du=S.prod[it.p]?.dueno;if(du)corr[du]=(corr[du]||0)+it.q*it.pr}}
     else{fiaP[d.piso]=(fiaP[d.piso]||0)+t;for(const it of d.items||[]){const du=S.prod[it.p]?.dueno;if(du)fiaD[du]=(fiaD[du]||0)+it.q*it.pr}}}
-  for(const c of S.cobros){const d=c.data();if(off(d,'c:'+c.id))continue;const k=d.piso+d.turno,m=Number(d.monto||0),a=norm(d.a||'Eduardo');pend[k]=(pend[k]||0)-m;hold[a]=(hold[a]||0)+m}
-  for(const x of S.entregas){const d=x.data();if(off(d,'e:'+x.id))continue;const m=Number(d.monto||0),de=norm(d.de),a=norm(d.a);hold[de]=(hold[de]||0)-m;hold[a]=(hold[a]||0)+m}
+  for(const c of S.cobros){const d=c.data();if(off(d,'c:'+c.id))continue;const k=d.piso+d.turno,m=Number(d.monto||0),a=norm(d.a||'Eduardo');pend[k]=(pend[k]||0)-m}
+  const T=trazaDinero(off);for(const q of QUIEN)hold[q]=Object.values(T.hb[q]||{}).reduce((s,v)=>s+v,0);
   const rein={};for(const x of S.rein){const d=x.data();if(off(d,'i:'+x.id))continue;rein[d.dueno]=(rein[d.dueno]||0)+Number(d.monto||0)}
   const pendP={};for(const n of PISOS)pendP[n]=(pend[n+'m']||0)+(pend[n+'t']||0);
-  return{stock,pend,pendP,hold,corr,fiaP,fiaD,rein};
+  return{stock,pend,pendP,hold,corr,fiaP,fiaD,rein,hb:T.hb,origen:T.origen};
 }
 const myDoc=pu=>S.ventas.find(v=>v.id===hoy()+'_'+pu.piso+pu.turno);
 
@@ -245,7 +268,7 @@ function renderHijo(c,d,adm){
   const L=[];
   for(const v of S.ventas){const x=v.data();for(const i of x.items||[])if(mine(i.p)&&!i.anulado)L.push({p:i.p,q:i.q,m:i.q*i.pr,ts:i.ts,piso:x.piso,tipo:'Cobrada'})}
   for(const f of S.fiados){const x=f.data();if(x.anulado)continue;for(const i of x.items||[])if(mine(i.p))L.push({p:i.p,q:i.q,m:i.q*i.pr,ts:x.ts,piso:x.piso,tipo:x.pagado?'Pagada después':'Pendiente · '+x.cliente})}
-  const co=c.corr[d]||0,ti=c.hold[d]||0,re=c.rein[d]||0,disp=ti-re,porRec=co-ti,deben=c.fiaD[d]||0;
+  const ti=(c.hb[d]||{})[d]||0,re=c.rein[d]||0,disp=ti-re,oth=QUIEN.reduce((s,q)=>s+(q===d?0:((c.hb[q]||{})[d]||0)),0),porRec=(c.origen[d]||0)+oth,co=porRec+ti,deben=c.fiaD[d]||0;
   $('#cash').innerHTML=`<div><small>${adm?'Panel de '+esc(d):'Hola, '+esc(d)} · Disponible para usar</small><b>${money(disp)}</b></div>
     ${adm?`<div class="nav">${DUENOS.map(x=>`<button data-a="hijoSel" data-v="${x}" class="${x===d?'on':''}">${x}</button>`).join('')}</div>`:''}`;
   const per=hijoPer,desde=per==='mes'?new Date(new Date().getFullYear(),new Date().getMonth(),1).getTime():per==='30'?now-30*DAY:0;
@@ -297,12 +320,12 @@ function renderPanel(c){
     ${QUIEN.map(q=>{const v=c.hold[q]||0;const fin=DUENOS.includes(q);return`<div class="row"><div class="g">${q}<div class="s">${fin?'Destino final':'De paso: debe entregarlo'}</div></div><span class="m">${money(v)}</span>${!fin&&v>0.009?`<button class="dk" data-a="entregar" data-v="${q}">Entregar</button>`:''}</div>`}).join('')}</div>
     ${(()=>{const hd=c.hold['Eduardo']||0;if(hd<=0.009)return '';const rs=repartoKids(c);const sumF=rs.reduce((s,r)=>s+r.f,0);
       return `<h2>Reparto de tu dinero</h2><div class="card"><div class="note" style="margin:0">Tienes ${money(hd)} en tus manos</div>${rs.map(r=>`<div class="st"><span>Le corresponde a ${r.d}</span><b>${money(r.f)}</b></div>${r.amt>0.009?`<button class="dk wide" data-a="entregar" data-v="Eduardo>${r.d}|${r.amt}">Entregar ${money(r.amt)} a ${r.d}</button>`:''}`).join('')}${sumF>hd+0.009?'<p class="note" style="color:var(--acc)">Tu dinero no alcanza para todo lo que les corresponde. Entrega primero a quien más falte.</p>':''}</div>`})()}
-    <h2>Cuenta de cada hijo</h2><div class="cards">${DUENOS.map(d=>{const co=c.corr[d]||0,ti=c.hold[d]||0,f=co-ti,otro=DUENOS.find(x=>x!==d);
+    <h2>Cuenta de cada hijo</h2><div class="cards">${DUENOS.map(d=>{const ti=(c.hb[d]||{})[d]||0,oth=QUIEN.reduce((s,q)=>s+(q===d?0:((c.hb[q]||{})[d]||0)),0),rc=c.origen[d]||0,f=rc+oth,co=f+ti,otro=DUENOS.find(x=>x!==d),ajena=(c.hb[d]||{})[otro]||0;
       return`<div class="card"><h3>${esc(d)}</h3>
-      <div class="st"><span>Le corresponde (todas sus ventas)</span><b>${money(co)}</b></div>
+      <div class="st"><span>Dinero suyo (en total)</span><b>${money(co)}</b></div>
       <div class="st"><span>Ya tiene en sus manos</span><b>${money(ti)}</b></div>
       ${c.fiaD[d]?`<div class="st"><span>Le deben clientes (aún sin cobrar)</span><b>${money(c.fiaD[d])}</b></div>`:''}
-      ${f>0.009?`<div class="note" style="margin-top:10px">Le falta recibir</div><div class="big" style="color:var(--acc)">${money(f)}</div>`
+      ${ajena>0.009?`<div class="note" style="margin-top:10px">Tiene dinero de ${esc(otro)}</div><div class="big">${money(ajena)}</div><button class="dk wide" data-a="entregar" data-v="${d}>${otro}|${ajena}">Pasar a ${esc(otro)}</button>`:f>0.009?`<div class="note" style="margin-top:10px">Le falta recibir</div><div class="big" style="color:var(--acc)">${money(f)}</div>`
        :f<-0.009?`<div class="note" style="margin-top:10px">Tiene dinero de ${esc(otro)}</div><div class="big">${money(-f)}</div><button class="dk wide" data-a="entregar" data-v="${d}>${otro}|${-f}">Pasar a ${esc(otro)}</button>`
        :`<div class="big" style="color:var(--ok);margin-top:10px">Al día ✓</div>`}</div>`}).join('')}</div>
     <p class="note">Las ventas pendientes de cobro se suman a cada hijo cuando el cliente paga. "Le falta recibir" incluye lo que sigue en las recepciones, con Elisa o contigo.</p>`;
@@ -404,7 +427,7 @@ function stockIdealHtml(c){
 }
 // Quién tiene el dinero y dónde está el de las recepciones
 function holdersHtml(c){
-  const rows=QUIEN.map(q=>{const v=c.hold[q]||0;return `<div class="row"><div class="g"><b>${esc(q)}</b><div class="s">${DUENOS.includes(q)?'Destino final':'Tiene dinero para entregar'}</div></div><span class="m">${money(v)}</span></div>`}).join('');
+  const rows=QUIEN.map(q=>{const v=c.hold[q]||0;return `<div class="row"><div class="g"><b>${esc(q)}</b><div class="s">${Object.entries(c.hb[q]||{}).filter(([,v])=>v>0.009).map(([o,v])=>`de ${esc(o)}: ${money(v)}`).join(' · ')||(DUENOS.includes(q)?'Destino final':'Sin dinero')}</div></div><span class="m">${money(v)}</span></div>`}).join('');
   const rec=PISOS.map(n=>`<div class="row"><div class="g">Recepción Piso ${n}<div class="s">Dinero de ventas aún sin retirar</div></div><span class="m">${money(Math.max(0,c.pendP[n]||0))}</span></div>`).join('');
   return `<div class="list">${rows}</div><p class="note">Pide el dinero a la persona que aparece con monto. El dinero de las recepciones se retira en esa recepción.</p><div class="list" style="margin-top:8px">${rec}</div>`;
 }
@@ -423,9 +446,8 @@ function ventasPeriodos(d){
 }
 // Reparto del dinero YA RETIRADO entre los hijos, según su porcentaje de ventas
 function repartoKids(c){
-  let ret=0;for(const x of S.cobros){const d=x.data();if(!d.anulado)ret+=Number(d.monto||0)}
-  const tot=Object.values(c.corr).reduce((s,v)=>s+v,0),hd=c.hold.Eduardo||0;
-  return DUENOS.map(d=>{const pct=tot>0?(c.corr[d]||0)/tot:0;const f=Math.max(0,pct*ret-(c.hold[d]||0));return{d,f,amt:Math.min(f,hd)}});
+  const h=(c.hb&&c.hb.Eduardo)||{};
+  return DUENOS.map(d=>{const f=Math.max(0,h[d]||0);return{d,f,amt:f}});
 }
 function openSheet(html){$('#sheet').innerHTML=html;$('#ovl').classList.add('on')}
 function closeSheet(){$('#ovl').classList.remove('on');sheetData=null}
@@ -508,7 +530,7 @@ const act={
     queue(async()=>{await db.collection('cobros').add({piso:Number(k[0]),turno:k[1],monto:m,a,ts:Date.now()});toast('Retiro registrado ✓')})},
   entregar:v=>{const [de,rest]=v.split('>'),[pre,mx]=(rest||'').split('|');const c=calc(),v0=mx?Number(mx):Math.max(0,c.hold[de]||0);sheetData={de,a:pre||null,max:Math.max(0,c.hold[de]||0)};
     openSheet(`<h3>${esc(de)} entrega dinero</h3><p class="note">Tiene ${money(sheetData.max)} en sus manos.</p>
-    ${repartoKids(c).map(r=>`<p class="note">Le corresponde a ${r.d} (del dinero ya retirado): <b>${money(r.f)}</b></p>`).join('')}
+    ${repartoKids(c).map(r=>`<p class="note">Del dinero que tienes, es de ${r.d}: <b>${money(r.f)}</b></p>`).join('')}
     <label for="mto">Monto</label><input id="mto" type="number" inputmode="decimal" min="0" step="any" value="${Math.round(v0*100)/100}">
     <label>¿A quién se lo entrega?</label><div class="pick two">${QUIEN.filter(q=>q!==de).map(q=>`<button data-a="selA" data-v="${q}" class="${q===pre?'on':''}">${q}</button>`).join('')}</div>
     <button class="dk wide" data-a="okEnt" style="margin-top:14px">Registrar entrega</button><button class="ghost wide" data-a="cerrar">Cancelar</button>`)},

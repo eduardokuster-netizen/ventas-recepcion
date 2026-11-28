@@ -90,7 +90,7 @@ label{font-weight:700;font-size:14px;display:block;margin:10px 0 4px}
 </head>
 <body>
 <header>
-  <div class="top"><h1>Ventas en recepción <span class="ver">v2.4</span></h1><div class="nav" id="nav" hidden></div></div>
+  <div class="top"><h1>Ventas en recepción <span class="ver">v2.6</span></h1><div class="nav" id="nav" hidden></div></div>
   <div class="cash" id="cash"></div>
 </header>
 <main id="main"><p class="empty">Cargando…</p></main>
@@ -124,7 +124,7 @@ const norm=n=>n==='Gerente'?'Elisa':n;
 let periodo='mes',db=null,owner=false,view='vender',tab='dinero',pisoRepo=null,repoVals={},sheetData=null,vistaAdm='vender',REG={};
 let histF='todo',hijoSel='Mateo',hijoPer='mes',cart={},me=null,names={},solEstado='?',solUid='';
 let devId='',devCode='',turnoMan=null,unsubs=[],cfgUnsub=null,lastAsig=null,slow=null,chain=Promise.resolve();
-const S={prod:{},repo:[],cobros:[],entregas:[],ventas:[],fiados:[],rein:[],cfg:{},sol:[],got:{}};
+const S={prod:{},repo:[],cobros:[],entregas:[],ventas:[],fiados:[],rein:[],cfg:{},sol:[],got:{},ideal:{}};let idealVals={};
 const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
 try{const t=JSON.parse(ls.get('turno')||'null');if(t&&t.f===hoy())turnoMan=t.t}catch(e){}
 const turnoAuto=()=>new Date().getHours()<13?'m':'t';
@@ -269,9 +269,13 @@ function renderHijo(c,d,adm){
     <div style="margin-top:12px" class="note">Disponible para usar</div><div class="big" style="color:${disp<0?'var(--acc)':'var(--ok)'}">${money(disp)}</div>
     <button class="pri wide" data-a="reinv" data-v="${esc(d)}">Registrar reinversión</button></div>
     ${rl.length?`<h2>Tus reinversiones</h2><div class="list">${rl.slice(0,30).map(x=>`<div class="row"><div class="g">${esc(x.nota||'Reinversión')}<div class="s">${fh(x.ts)}</div></div><span class="m">${money(x.monto)}</span><button class="ghost" data-a="borraRein" data-v="${esc(x.id)}">Borrar</button></div>`).join('')}</div>`:''}
+    <h2>Stock por piso vs ideal</h2>${stockIdealHtml(c)}
+    <button class="pri wide" data-a="hijoRepo">Reponer mercancía</button>
+    <h2>¿Quién tiene el dinero?</h2>${holdersHtml(c)}
     <h2>Qué preparar para reponer</h2><div class="list">${rec.length?rec.map(x=>`<div class="row"><div class="g"><b>${esc(S.prod[x.id].nombre)}</b><div class="s">Hay ${x.stock} en recepciones · se venden ~${x.avg.toFixed(1)} al día${isFinite(x.cob)?' · alcanza ~'+Math.floor(x.cob)+' días':''}</div></div>
       <span class="m" style="text-align:right;${x.prep&&x.cob<7?'color:var(--acc)':''}">${x.prep?'Prepara '+x.prep:'Bien por ahora'}<div class="s">${x.prep&&x.cob<7?'Urgente':x.prep?'Para 2 semanas':''}</div></span></div>`).join(''):'<p class="empty">No tienes productos asignados.</p>'}</div>
     <p class="note">${pocos?'Aún hay pocos días de ventas; las recomendaciones mejoran con más datos. ':''}Se calcula con lo vendido en los últimos 14 días para cubrir las próximas 2 semanas, dejando una reserva para reponer los 3 pisos.</p>
+    <h2>Vendido hoy, ayer y esta semana</h2>${ventasPeriodos(d)}
     <h2>Estadísticas</h2><div class="tabs">${[['mes','Este mes'],['30','Últimos 30 días'],['todo','Todo']].map(([k,t])=>`<button data-a="hijoPer" data-v="${k}" class="${per===k?'on':''}">${t}</button>`).join('')}</div>
     <div class="cards" style="margin-top:10px"><div class="card"><div class="note" style="margin:0">Vendido en el periodo</div><div class="big">${money(totM)}</div><div class="note">${totU} unidades</div>
       <h3 style="font-size:16px;margin-top:14px">Más vendidos</h3>${rank.map((x,i)=>bar((i+1)+'. '+esc(S.prod[x.id].nombre),x.u,maxU,x.u+' uds · '+money(x.m))).join('')||'<p class="note">Sin ventas.</p>'}</div>
@@ -282,7 +286,7 @@ function renderHijo(c,d,adm){
 function renderPanel(c){
   const total=PISOS.reduce((s,n)=>s+Math.max(0,c.pendP[n]||0),0);
   $('#cash').innerHTML=`<div><small>Por cobrar en las 3 recepciones</small><b>${money(total)}</b></div>`;
-  const tabs=[['dinero','Dinero'],['resumen','Resumen'],['reponer','Reponer'],['productos','Productos'],['celulares','Celulares'],['historial','Historial']];
+  const tabs=[['dinero','Dinero'],['resumen','Resumen'],['reponer','Reponer'],['ideal','Ideal'],['productos','Productos'],['celulares','Celulares'],['historial','Historial']];
   let h=`<div class="tabs">${tabs.map(([k,t])=>`<button data-a="tab" data-v="${k}" class="${tab===k?'on':''}">${t}</button>`).join('')}</div>`;
   const ps=prods();
   if(tab==='dinero'){
@@ -311,7 +315,7 @@ function renderPanel(c){
       em[d]=em[d]||{m:0,u:0,prod:{}};const x=em[d].prod[i.p]=em[d].prod[i.p]||{n:p?.nombre||'Producto',u:0,m:0};x.u+=i.q;x.m+=i.q*i.pr;em[d].u+=i.q;em[d].m+=i.q*i.pr}
     for(const f of S.fiados){const fd=f.data();if(fd.anulado||!fd.pagado||fd.pagado.ts<desde||fd.pagado.ts>=hasta)continue;for(const i of fd.items||[]){const p=S.prod[i.p];const d=p?.dueno||'Sin asignar';
       em[d]=em[d]||{m:0,u:0,prod:{}};const x=em[d].prod[i.p]=em[d].prod[i.p]||{n:p?.nombre||'Producto',u:0,m:0};x.u+=i.q;x.m+=i.q*i.pr;em[d].u+=i.q;em[d].m+=i.q*i.pr}}
-    h+=`<h2>Por emprendimiento</h2><div class="tabs">${[['mes','Este mes'],['pasado','Mes pasado'],['todo','Todo']].map(([k,t])=>`<button data-a="periodo" data-v="${k}" class="${periodo===k?'on':''}">${t}</button>`).join('')}</div>
+    h+=`<h2>Vendido hoy, ayer y esta semana</h2>${ventasPeriodos(null)}<h2>Por emprendimiento</h2><div class="tabs">${[['mes','Este mes'],['pasado','Mes pasado'],['todo','Todo']].map(([k,t])=>`<button data-a="periodo" data-v="${k}" class="${periodo===k?'on':''}">${t}</button>`).join('')}</div>
     <div class="cards" style="margin-top:10px">${Object.entries(em).filter(([d,e])=>DUENOS.includes(d)||e.u).map(([d,e])=>`<div class="card"><h3>${esc(d)}</h3>
       <div class="note" style="margin:0">Le corresponde</div><div class="big">${money(e.m)}</div><div class="note">${e.u} unidades vendidas</div>
       ${Object.values(e.prod).map(x=>`<div class="st"><span>${esc(x.n)} · ${x.u}</span><b>${money(x.m)}</b></div>`).join('')||'<p class="note">Sin productos asignados.</p>'}
@@ -333,6 +337,11 @@ function renderPanel(c){
     ${!pisoRepo?'':ps.length?ps.map(([id,p])=>{const v=repoVals[pisoRepo+'|'+id]??'';return`<div class="rp"><span>${esc(p.nombre)}</span><b style="text-align:center">${st[id]||0}</b><input type="number" inputmode="numeric" min="0" data-rp="${esc(id)}" value="${esc(v)}"></div>`}).join(''):'<p class="empty">Primero agrega productos.</p>'}
     <button class="pri wide" data-a="guardarRepo" ${ps.length&&pisoRepo?'':'disabled'}>Guardar reposición</button>
     <p class="note">"Dejar en" es el total que habrá en la recepción. Si cuentas menos de lo que dice la app (algo dañado o perdido), pon el número real y se ajusta.</p>`;
+  }
+  if(tab==='ideal'){
+    h+=`<h2>Cantidad ideal por piso</h2><p class="note">Cuántas unidades debe tener cada piso cuando está lleno. Actualiza estos números cuando agregues productos.</p>
+    ${PISOS.map(n=>`<div class="card" style="margin-bottom:12px"><h3>Piso ${n}</h3>${ps.length?ps.map(([id,p])=>`<div class="rp"><span>${esc(p.nombre)}</span><span></span><input type="number" inputmode="numeric" min="0" data-ideal="${n}|${esc(id)}" value="${esc(idealVals[n+'|'+id]??((S.ideal[n]||{})[id])??'')}"></div>`).join(''):'<p class="empty">Primero agrega productos.</p>'}</div>`).join('')}
+    <button class="pri wide" data-a="guardarIdeal">Guardar cantidades ideales</button>`;
   }
   if(tab==='productos'){
     const all=Object.entries(S.prod).sort((a,b)=>String(a[1].nombre).localeCompare(String(b[1].nombre)));
@@ -382,6 +391,34 @@ function renderPanel(c){
   $('#main').innerHTML=h;
 }
 
+// Stock por piso comparado con lo ideal (lo ven los hijos y el administrador)
+function stockIdealHtml(c){
+  const ps=prods();if(!ps.length)return '<p class="empty">Todavía no hay productos.</p>';
+  return PISOS.map(n=>{const rows=ps.map(([id,p])=>{const hay=Math.max(0,c.stock[n][id]||0),id2=(S.ideal[n]||{})[id],ideal=id2===undefined||id2===null?null:Number(id2),falta=ideal===null?0:Math.max(0,ideal-hay),pct=ideal?Math.min(100,Math.round(hay/ideal*100)):(hay>0?100:0);
+    return `<div class="row" style="gap:12px">${foto(p)?`<img class="th" style="width:56px;height:56px" src="${foto(p)}" alt="">`:'<span class="th" style="width:56px;height:56px;display:grid;place-items:center;font-size:26px">📦</span>'}
+    <div class="g"><b>${esc(p.nombre)}</b><div style="height:10px;background:var(--soft);border-radius:8px;overflow:hidden;margin:6px 0"><div style="height:100%;width:${pct}%;background:${pct<50?'var(--acc)':'var(--ok)'};border-radius:8px"></div></div><div class="s">Hay <b>${hay}</b>${ideal!==null?` de ${ideal}`:''}</div></div>
+    <div style="text-align:right;white-space:nowrap">${ideal===null?'<span class="s">Sin ideal</span>':falta>0?`<b style="color:var(--acc);font-size:18px">Llevar ${falta}</b>`:'<b style="color:var(--ok)">Lleno ✓</b>'}</div></div>`}).join('');
+    return `<div class="card" style="margin-bottom:12px"><h3>Piso ${n}</h3><div class="list" style="border:0">${rows}</div></div>`}).join('');
+}
+// Quién tiene el dinero y dónde está el de las recepciones
+function holdersHtml(c){
+  const rows=QUIEN.map(q=>{const v=c.hold[q]||0;return `<div class="row"><div class="g"><b>${esc(q)}</b><div class="s">${DUENOS.includes(q)?'Destino final':'Tiene dinero para entregar'}</div></div><span class="m">${money(v)}</span></div>`}).join('');
+  const rec=PISOS.map(n=>`<div class="row"><div class="g">Recepción Piso ${n}<div class="s">Dinero de ventas aún sin retirar</div></div><span class="m">${money(Math.max(0,c.pendP[n]||0))}</span></div>`).join('');
+  return `<div class="list">${rows}</div><p class="note">Pide el dinero a la persona que aparece con monto. El dinero de las recepciones se retira en esa recepción.</p><div class="list" style="margin-top:8px">${rec}</div>`;
+}
+// Vendido hoy, ayer y esta semana (d = nombre de hijo, o null para todo)
+function ventasPeriodos(d){
+  const ini=new Date();ini.setHours(0,0,0,0);const hoyT=ini.getTime(),ayerT=hoyT-864e5;
+  const lun=new Date(ini);lun.setDate(lun.getDate()-((lun.getDay()+6)%7));const semT=lun.getTime();
+  const mine=id=>d===null||S.prod[id]?.dueno===d;
+  const tot=(desde,hasta)=>{let m=0,u=0;const add=(q,pr,ts)=>{if(ts>=desde&&ts<hasta){u+=q;m+=q*pr}};
+    for(const v of S.ventas)for(const i of v.data().items||[])if(!i.anulado&&mine(i.p))add(i.q,i.pr,i.ts);
+    for(const f of S.fiados){const x=f.data();if(x.anulado||!x.pagado)continue;for(const i of x.items||[])if(mine(i.p))add(i.q,i.pr,x.pagado.ts)}
+    return{m,u}};
+  const hoyV=tot(hoyT,Infinity),ayerV=tot(ayerT,hoyT),semV=tot(semT,Infinity);
+  const box=(t,v)=>`<div class="card"><div class="note" style="margin:0">${t}</div><div class="big" style="font-size:26px">${money(v.m)}</div><div class="note">${v.u} unidades</div></div>`;
+  return `<div class="cards">${box('Hoy',hoyV)}${box('Ayer',ayerV)}${box('Esta semana',semV)}</div>`;
+}
 function openSheet(html){$('#sheet').innerHTML=html;$('#ovl').classList.add('on')}
 function closeSheet(){$('#ovl').classList.remove('on');sheetData=null}
 
@@ -451,7 +488,8 @@ const act={
     queue(async()=>{const ref=db.doc('ventas/'+hoy()+'_'+pu.piso+pu.turno);const s=await ref.get();const d=s.exists?s.data():{};
       await ref.set({fecha:hoy(),piso:pu.piso,turno:pu.turno,items:[...(d.items||[]),...nuevos]});toast('Venta registrada ✓')})},
   undo:iid=>{openSheet(`<h3>¿Deshacer esta venta?</h3><p class="note">Úsalo si la registraste por error. El producto vuelve al stock y la venta queda anulada en el historial.</p><button class="pri wide" data-a="okUndo" data-v="${esc(iid)}">Sí, deshacer</button><button class="ghost wide" data-a="cerrar">No</button>`)},
-  okUndo:iid=>{closeSheet();const pu=puestoAct();if(!pu)return;queue(async()=>{const ref=db.doc('ventas/'+hoy()+'_'+pu.piso+pu.turno);const s=await ref.get();if(!s.exists)return;const d=s.data();
+  okUndo:iid=>{closeSheet();const pu=puestoAct();if(!pu)return;
+    const base=negs(calc()),nw=negs(calc({k:'v:'+iid,on:true}));if(nw.some(x=>!base.includes(x)))return toast('No se puede deshacer: el dinero de esta venta ya fue retirado o entregado. Pide al administrador que la anule desde el historial.');queue(async()=>{const ref=db.doc('ventas/'+hoy()+'_'+pu.piso+pu.turno);const s=await ref.get();if(!s.exists)return;const d=s.data();
       await ref.set({fecha:d.fecha,piso:d.piso,turno:d.turno,items:(d.items||[]).map(i=>(i.v||i.id)===iid?{...i,anulado:{ts:Date.now(),motivo:'Deshecho en recepción'}}:i)});toast('Venta deshecha')})},
   cobrar:k=>{const v=Math.max(0,calc().pendP[k[0]]||0);sheetData={k,a:null};openSheet(`<h3>Retiro de efectivo</h3><p class="note">La recepción del piso ${k[0]} tiene ${money(v)} según las ventas (mañana y tarde juntas).</p>
     <label for="mto">Monto entregado</label><input id="mto" type="number" inputmode="decimal" min="0" step="any" value="${v}">
@@ -481,6 +519,18 @@ const act={
     const nom=new Map(items.map(i=>[i.p,S.prod[i.p]?.nombre||'Producto']));
     openSheet(`<h3>¿Confirmar reposición?</h3><p class="note">Piso ${pisoRepo}. Revisa antes de guardar:</p><div class="list">${items.map(i=>`<div class="row"><div class="g">${esc(nom.get(i.p))}<div class="s">Hay ${st[i.p]||0} → quedará en ${(st[i.p]||0)+i.q}</div></div><b>${i.q>0?'+':''}${i.q} uds.</b></div>`).join('')}</div><button class="pri wide" data-a="okRepo" style="margin-top:14px">Sí, guardar reposición</button><button class="ghost wide" data-a="cerrar">Cancelar</button>`);
     sheetData={piso:pisoRepo,items}},
+  guardarIdeal:()=>{const nuevo={};for(const n of PISOS){nuevo[n]={};for(const id of Object.keys(S.prod)){const k=n+'|'+id;const raw=idealVals[k]!==undefined?idealVals[k]:((S.ideal[n]||{})[id]);if(raw===undefined||raw===null||String(raw).trim()==='')continue;nuevo[n][id]=Math.max(0,Math.round(Number(raw)||0))}}
+    queue(async()=>{await db.doc('config/ideal').set(nuevo);idealVals={};toast('Cantidades ideales guardadas ✓')})},
+  hijoRepo:()=>{sheetData={piso:null};openSheet(`<h3>Reponer mercancía</h3><p class="note">Elige el piso y escribe cuántas unidades vas a llevar de cada producto.</p><div class="pick">${PISOS.map(n=>`<button data-a="hijoPiso" data-v="${n}">Piso ${n}</button>`).join('')}</div><div id="rf"></div><button class="ghost wide" data-a="cerrar">Cancelar</button>`)},
+  hijoPiso:n=>{const piso=Number(n);sheetData={piso};document.querySelectorAll('#sheet [data-a=hijoPiso]').forEach(b=>b.classList.toggle('on',Number(b.dataset.v)===piso));
+    const c=calc(),ps=prods();
+    $('#rf').innerHTML=(ps.length?ps.map(([id,p])=>{const hay=c.stock[piso][id]||0,ide=(S.ideal[piso]||{})[id];return `<div class="rp"><span>${foto(p)?`<img class="th" style="width:40px;height:40px" src="${foto(p)}" alt="">`:''}${esc(p.nombre)}<div class="s">Hay ${hay}${ide!==undefined?' · ideal '+ide:''}</div></span><span></span><input type="number" inputmode="numeric" min="0" data-llevo="${esc(id)}" value=""></div>`}).join(''):'<p class="empty">No hay productos.</p>')+`<button class="pri wide" data-a="revRepo" style="margin-top:14px">Revisar reposición</button>`},
+  revRepo:()=>{const piso=sheetData&&sheetData.piso;if(!piso)return toast('Elige el piso primero');
+    const items=[...document.querySelectorAll('#rf [data-llevo]')].map(i=>({p:i.dataset.llevo,q:Math.round(Number(i.value)||0)})).filter(i=>i.q>0);
+    if(!items.length)return toast('Escribe cuántas unidades llevas');
+    openSheet(`<h3>¿Confirmar reposición del Piso ${piso}?</h3><p class="note">Se sumará al stock del piso:</p><div class="list">${items.map(i=>`<div class="row"><div class="g">${esc(S.prod[i.p]?.nombre||'Producto')}</div><b>+${i.q} uds.</b></div>`).join('')}</div><button class="pri wide" data-a="okHijoRepo" style="margin-top:14px">Sí, reponer</button><button class="ghost wide" data-a="cerrar">Cancelar</button>`);
+    sheetData={piso,items}},
+  okHijoRepo:()=>{const {piso,items}=sheetData;closeSheet();queue(async()=>{await db.collection('reposiciones').add({piso,items,ts:Date.now(),por:(myCfg()||{}).hijo||''});toast('Reposición guardada ✓')})},
   okRepo:()=>{const {piso,items}=sheetData;closeSheet();
     queue(async()=>{await db.collection('reposiciones').add({piso,items,ts:Date.now()});for(const k in repoVals)if(k.startsWith(piso+'|'))delete repoVals[k];toast('Reposición guardada ✓')})},
   editP:id=>{const p=id?S.prod[id]:{nombre:'',precio:'',activo:true,dueno:''};const ops=[...new Set([...DUENOS,...(p.dueno?[p.dueno]:[])])];sheetData={pid:id,blob:null,quitar:false,foto:p.img||''};
@@ -520,7 +570,7 @@ document.addEventListener('change',async e=>{if(e.target.id!=='pf'||!e.target.fi
     cv.width=Math.round(bm.width*k);cv.height=Math.round(bm.height*k);cv.getContext('2d').drawImage(bm,0,0,cv.width,cv.height);
     const b=await new Promise(r=>cv.toBlob(r,'image/jpeg',.75));if(!sheetData)return;sheetData.blob=b;sheetData.quitar=false;
     const im=document.createElement('img');im.src=URL.createObjectURL(b);im.alt='';$('#phb').replaceChildren(im)}catch(err){console.error(err);toast('No se pudo leer esa imagen')}});
-document.addEventListener('input',e=>{if(e.target.dataset.rp)repoVals[pisoRepo+'|'+e.target.dataset.rp]=e.target.value});
+document.addEventListener('input',e=>{if(e.target.dataset.rp)repoVals[pisoRepo+'|'+e.target.dataset.rp]=e.target.value;if(e.target.dataset.ideal)idealVals[e.target.dataset.ideal]=e.target.value});
 
 const DATA=[['productos',s=>{S.prod={};s.docs.forEach(d=>S.prod[d.id]=d.data())}],['reposiciones',s=>{S.repo=s.docs}],['cobros',s=>{S.cobros=s.docs}],
   ['entregas',s=>{S.entregas=s.docs}],['ventas',s=>{S.ventas=s.docs}],['fiados',s=>{S.fiados=s.docs}],['reinversiones',s=>{S.rein=s.docs}]];
@@ -531,7 +581,7 @@ function startData(){unsubs.forEach(u=>u());unsubs=[];
   if(owner)unsubs.push(db.collection('solicitudes').onSnapshot(s=>{S.sol=s.docs;safeRender()},e=>console.error(e)));}
 function startAll(){cfgUnsub&&cfgUnsub();unsubs.forEach(u=>u());unsubs=[];S.got={};lastAsig=null;clearTimeout(slow);
   slow=setTimeout(()=>{if(!listo())$('#main').innerHTML='<p class="empty">No se pudo conectar todavía. Revisa el internet; seguimos intentando…</p>'},10000);
-  cfgUnsub=db.collection('config').onSnapshot(s=>{const d=s.docs.find(x=>x.id==='dispositivos');S.cfg=d?{...d.data()}:{};
+  cfgUnsub=db.collection('config').onSnapshot(s=>{const d=s.docs.find(x=>x.id==='dispositivos');S.cfg=d?{...d.data()}:{};const idl=s.docs.find(x=>x.id==='ideal');S.ideal=idl?idl.data():{};
     const a=owner||!!myCfg();S.got.config=1;if(a!==lastAsig){lastAsig=a;startData()}safeRender()},
     e=>{console.error(e);S.got.config=1;safeRender()});}
 onAuthStateChanged(auth,async u=>{

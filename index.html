@@ -90,7 +90,7 @@ label{font-weight:700;font-size:14px;display:block;margin:10px 0 4px}
 </head>
 <body>
 <header>
-  <div class="top"><h1>Ventas en recepción <span class="ver">v2.7</span></h1><div class="nav" id="nav" hidden></div></div>
+  <div class="top"><h1>Ventas en recepción <span class="ver">v2.8</span></h1><div class="nav" id="nav" hidden></div></div>
   <div class="cash" id="cash"></div>
 </header>
 <main id="main"><p class="empty">Cargando…</p></main>
@@ -295,7 +295,7 @@ function renderPanel(c){
     <div class="row"><div class="g">En las recepciones<div class="s">Todavía no retirado</div></div><span class="m">${money(recep)}</span><button class="ghost" data-a="tab" data-v="resumen">Ver</button></div>
     <div class="row"><div class="g">Lo deben clientes<div class="s">Ventas pendientes de cobro</div></div><span class="m">${money(Object.values(c.fiaP).reduce((a,b)=>a+b,0))}</span></div>
     ${QUIEN.map(q=>{const v=c.hold[q]||0;const fin=DUENOS.includes(q);return`<div class="row"><div class="g">${q}<div class="s">${fin?'Destino final':'De paso: debe entregarlo'}</div></div><span class="m">${money(v)}</span>${!fin&&v>0.009?`<button class="dk" data-a="entregar" data-v="${q}">Entregar</button>`:''}</div>`}).join('')}</div>
-    ${(()=>{const hd=c.hold['Eduardo']||0;if(hd<=0.009)return '';const rs=DUENOS.map(d=>{const f=Math.max(0,(c.corr[d]||0)-(c.hold[d]||0));return{d,f,amt:Math.min(f,hd)}});const sumF=rs.reduce((s,r)=>s+r.f,0);
+    ${(()=>{const hd=c.hold['Eduardo']||0;if(hd<=0.009)return '';const rs=repartoKids(c);const sumF=rs.reduce((s,r)=>s+r.f,0);
       return `<h2>Reparto de tu dinero</h2><div class="card"><div class="note" style="margin:0">Tienes ${money(hd)} en tus manos</div>${rs.map(r=>`<div class="st"><span>Le corresponde a ${r.d}</span><b>${money(r.f)}</b></div>${r.amt>0.009?`<button class="dk wide" data-a="entregar" data-v="Eduardo>${r.d}|${r.amt}">Entregar ${money(r.amt)} a ${r.d}</button>`:''}`).join('')}${sumF>hd+0.009?'<p class="note" style="color:var(--acc)">Tu dinero no alcanza para todo lo que les corresponde. Entrega primero a quien más falte.</p>':''}</div>`})()}
     <h2>Cuenta de cada hijo</h2><div class="cards">${DUENOS.map(d=>{const co=c.corr[d]||0,ti=c.hold[d]||0,f=co-ti,otro=DUENOS.find(x=>x!==d);
       return`<div class="card"><h3>${esc(d)}</h3>
@@ -421,6 +421,12 @@ function ventasPeriodos(d){
   const box=(t,v)=>`<div class="card"><div class="note" style="margin:0">${t}</div><div class="big" style="font-size:26px">${money(v.m)}</div><div class="note">${v.u} unidades</div></div>`;
   return `<div class="cards">${box('Hoy',hoyV)}${box('Ayer',ayerV)}${box('Esta semana',semV)}</div>`;
 }
+// Reparto del dinero YA RETIRADO entre los hijos, según su porcentaje de ventas
+function repartoKids(c){
+  let ret=0;for(const x of S.cobros){const d=x.data();if(!d.anulado)ret+=Number(d.monto||0)}
+  const tot=Object.values(c.corr).reduce((s,v)=>s+v,0),hd=c.hold.Eduardo||0;
+  return DUENOS.map(d=>{const pct=tot>0?(c.corr[d]||0)/tot:0;const f=Math.max(0,pct*ret-(c.hold[d]||0));return{d,f,amt:Math.min(f,hd)}});
+}
 function openSheet(html){$('#sheet').innerHTML=html;$('#ovl').classList.add('on')}
 function closeSheet(){$('#ovl').classList.remove('on');sheetData=null}
 
@@ -502,7 +508,7 @@ const act={
     queue(async()=>{await db.collection('cobros').add({piso:Number(k[0]),turno:k[1],monto:m,a,ts:Date.now()});toast('Retiro registrado ✓')})},
   entregar:v=>{const [de,rest]=v.split('>'),[pre,mx]=(rest||'').split('|');const c=calc(),v0=mx?Number(mx):Math.max(0,c.hold[de]||0);sheetData={de,a:pre||null,max:Math.max(0,c.hold[de]||0)};
     openSheet(`<h3>${esc(de)} entrega dinero</h3><p class="note">Tiene ${money(sheetData.max)} en sus manos.</p>
-    ${DUENOS.map(d=>`<p class="note">Le corresponde a ${d}: <b>${money(Math.max(0,(c.corr[d]||0)-(c.hold[d]||0)))}</b></p>`).join('')}
+    ${repartoKids(c).map(r=>`<p class="note">Le corresponde a ${r.d} (del dinero ya retirado): <b>${money(r.f)}</b></p>`).join('')}
     <label for="mto">Monto</label><input id="mto" type="number" inputmode="decimal" min="0" step="any" value="${Math.round(v0*100)/100}">
     <label>¿A quién se lo entrega?</label><div class="pick two">${QUIEN.filter(q=>q!==de).map(q=>`<button data-a="selA" data-v="${q}" class="${q===pre?'on':''}">${q}</button>`).join('')}</div>
     <button class="dk wide" data-a="okEnt" style="margin-top:14px">Registrar entrega</button><button class="ghost wide" data-a="cerrar">Cancelar</button>`)},
